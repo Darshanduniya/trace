@@ -1,0 +1,140 @@
+from airflow import DAG
+
+from airflow.operators.postgres_operator import PostgresOperator
+
+from airflow.operators.python_operator import PythonOperator
+
+from datetime import datetime, timedelta
+
+import os
+
+import psycopg2
+
+# Define default_args for the DAG
+
+default_args = {
+
+    'owner': 'airflow',
+
+    'start_date': datetime(2023, 1, 1),
+
+    'depends_on_past': False,
+
+    'retries': 1,
+
+    'retry_delay': timedelta(minutes=5),
+
+}
+
+# Create the DAG
+
+dag = DAG(
+
+    'read_airflow_logs_to_postgres',
+
+    default_args=default_args,
+
+    schedule_interval=timedelta(hours=1),  # Change this to your desired schedule interval
+
+)
+
+# Function to read logs and insert into PostgreSQL
+
+def read_logs_and_insert_to_postgres():
+
+    # Get the path to the Airflow logs folder
+
+    logs_folder = os.path.expanduser("~/airflow/logs")
+
+    # Connect to PostgreSQL
+
+    conn = psycopg2.connect(
+
+        dbname='your_database_name',
+
+        user='your_user',
+
+        password='your_password',
+
+        host='your_host',
+
+        port='your_port'
+
+    )
+
+    cursor = conn.cursor()
+
+    # Iterate through the logs folder
+
+    for subdir, _, files in os.walk(logs_folder):
+
+        for file in files:
+
+            # Read log file
+
+            with open(os.path.join(subdir, file), 'r') as f:
+
+                log_data = f.read()
+
+            # Extract log information
+
+            log_lines = log_data.split("\n")
+
+            for line in log_lines:
+
+                log_parts = line.split("\t")
+
+                if len(log_parts) >= 4:
+
+                    dag_id = log_parts[0]
+
+                    log_message = log_parts[1]
+
+                    log_level = log_parts[2]
+
+                    date_time = log_parts[3]
+
+                    # Extract stacktrace if present
+
+                    if "Traceback" in log_message:
+
+                        stacktrace = log_message.split("Traceback")[1]
+
+                    else:
+
+                        stacktrace = None
+
+                    # Insert log data into PostgreSQL
+
+                    cursor.execute(
+
+                        "INSERT INTO your_table_name (dag_id, log_message, log_level, date_time, stacktrace) VALUES (%s, %s, %s, %s, %s)",
+
+                        (dag_id, log_message, log_level, date_time, stacktrace)
+
+                    )
+
+    # Commit and close connection
+
+    conn.commit()
+
+    cursor.close()
+
+    conn.close()
+
+# Create a PythonOperator to call the function that reads logs and inserts into PostgreSQL
+
+read_logs_task = PythonOperator(
+
+    task_id='read_logs_and_insert_to_postgres',
+
+    python_callable=read_logs_and_insert_to_postgres,
+
+    dag=dag
+
+)
+
+# Set task dependencies
+
+read_logs_task
+
